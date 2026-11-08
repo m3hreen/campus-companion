@@ -12,6 +12,7 @@ import '../models/study_session.dart';
 import 'academics_screen.dart';
 import '../dialogs/add_course_dialog.dart';
 import '../widgets/app_drawer.dart';
+import '../utils/app_feedback.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({
@@ -60,9 +61,7 @@ class _MainScreenState extends State<MainScreen> {
   ];
 
   void _feedback(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showAppFeedback(context, message);
   }
 
   Future<void> _addCourse() async {
@@ -84,9 +83,23 @@ class _MainScreenState extends State<MainScreen> {
     _feedback('Assignment updated');
   }
 
+  // Revisions stop an old queued Undo from reversing a newer checkbox change.
+  final Map<Assignment, int> _completionRevisions = {};
+
   void _toggleAssignment(Assignment assignment) {
-    setState(() { assignment.isCompleted = !assignment.isCompleted; });
-    _feedback(assignment.isCompleted ? 'Assignment completed' : 'Assignment marked incomplete');
+    final bool previous = assignment.isCompleted;
+    final int revision = (_completionRevisions[assignment] ?? 0) + 1;
+    setState(() {
+      assignment.isCompleted = !previous;
+      _completionRevisions[assignment] = revision;
+    });
+    showAppFeedback(context, assignment.isCompleted ? 'Assignment completed' : 'Assignment marked incomplete', onUndo: () {
+      if (!mounted || !assignments.contains(assignment) || _completionRevisions[assignment] != revision) return;
+      setState(() {
+        assignment.isCompleted = previous;
+        _completionRevisions[assignment] = revision + 1;
+      });
+    });
   }
 
   Future<void> _deleteAssignment(Assignment assignment) async {
@@ -100,13 +113,10 @@ class _MainScreenState extends State<MainScreen> {
     final int index = assignments.indexOf(assignment);
     if (index < 0) return;
     setState(() { assignments.removeAt(index); });
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: const Text('Assignment deleted'),
-        action: SnackBarAction(label: 'Undo', onPressed: () {
-          if (!mounted) return;
-          setState(() { assignments.insert(index <= assignments.length ? index : assignments.length, assignment); });
-        })));
+    showAppFeedback(context, 'Assignment deleted', onUndo: () {
+      if (!mounted || assignments.contains(assignment)) return;
+      setState(() { assignments.insert(index <= assignments.length ? index : assignments.length, assignment); });
+    });
   }
 
   // Temporary sample assignments.

@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/study_session.dart';
 import '../widgets/daily_goal_card.dart';
+import '../utils/app_feedback.dart';
 
 class StudyScreen extends StatefulWidget {
   const StudyScreen({super.key, required this.courses, required this.sessions,
@@ -38,9 +39,7 @@ class _StudyScreenState extends State<StudyScreen> {
   int get _displaySeconds => _stopwatchMode ? _elapsed : _remaining;
 
   void _message(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text)));
+    showAppFeedback(context, text);
   }
 
   void _start() {

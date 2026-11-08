@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../models/assignment.dart';
 import '../models/study_session.dart';
+import '../widgets/weekly_study_chart.dart';
 
 class InsightsScreen extends StatelessWidget {
   const InsightsScreen({super.key, required this.assignments, required this.sessions});
@@ -54,13 +55,12 @@ class InsightsScreen extends StatelessWidget {
     }
     final List<MapEntry<String, int>> courseTotals = byCourse.entries.toList()
       ..sort((MapEntry<String, int> a, MapEntry<String, int> b) => b.value.compareTo(a.value));
-    const List<String> weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final List<DateTime> dates = List<DateTime>.generate(7,
       (int index) => DateTime(today.year, today.month, today.day - 6 + index));
     final List<int> dailySeconds = dates.map((DateTime date) => recent.where((StudySession session) =>
       session.completedAt.year == date.year && session.completedAt.month == date.month && session.completedAt.day == date.day
     ).fold<int>(0, (int sum, StudySession session) => sum + session.seconds)).toList();
-    final int largestDay = dailySeconds.fold<int>(0, (int largest, int seconds) => seconds > largest ? seconds : largest);
+
 
     return ListView(padding: const EdgeInsets.all(20), children: [
       Text('Your progress', style: Theme.of(context).textTheme.headlineSmall),
@@ -88,14 +88,12 @@ class InsightsScreen extends StatelessWidget {
               totalSeconds == 0 ? 0 : entry.value / totalSeconds),
         ]))),
       _heading(context, 'Daily study activity'),
-      const Text('Last 7 days. Bar lengths are relative to your busiest day.'),
+      const Text('Saved study minutes over the last 7 days.'),
       const SizedBox(height: 8),
       Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
         crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (weekSeconds == 0) const Text('No saved study time in the last 7 days.'),
-          for (int index = 0; index < dates.length; index++)
-            _bar(context, '${weekdays[dates[index].weekday - 1]} ${dates[index].day}/${dates[index].month}',
-              _duration(dailySeconds[index]), largestDay == 0 ? 0 : dailySeconds[index] / largestDay),
+          WeeklyStudyChart(dates: dates, seconds: dailySeconds),
         ]))),
       const SizedBox(height: 16),
       const Text('Only saved sessions count. Study time is assigned to the session’s completion date. Data currently resets when the app restarts.'),
