@@ -1,0 +1,280 @@
+// Display assignment data from MainScreen. Callbacks ask the parent to update state or navigate.
+
+import 'package:flutter/material.dart';
+import '../models/assignment.dart';
+import '../widgets/daily_goal_card.dart';
+import '../widgets/quick_action_card.dart';
+import '../widgets/section_title.dart';
+import '../widgets/assignment_card.dart';
+
+class HomeScreen extends StatelessWidget {
+
+  final List<Assignment> assignments;
+  final int studiedSeconds;
+  final int goalMinutes;
+
+  final VoidCallback onAddAssignment;
+  final VoidCallback onOpenAcademics;
+  final VoidCallback onOpenStudy;
+
+  final Function(Assignment) onToggleAssignment;
+
+  const HomeScreen({
+    super.key,
+    required this.assignments,
+    required this.studiedSeconds,
+    required this.goalMinutes,
+    required this.onAddAssignment,
+    required this.onOpenAcademics,
+    required this.onOpenStudy,
+    required this.onToggleAssignment,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+
+    final completedCount =
+        assignments.where((a) => a.isCompleted).length;
+
+    final totalCount = assignments.length;
+
+    final progress = totalCount == 0
+        ? 0.0
+        : completedCount / totalCount;
+
+    final upcomingAssignments = assignments
+        .where((a) => !a.isCompleted)
+        .toList()
+      ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+
+        // WELCOME SECTION
+
+        const Text(
+          'Welcome back!',
+          style: TextStyle(
+            fontSize: 27,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 5),
+
+        Text(
+          'Here is your campus overview for today.',
+          style: TextStyle(
+            fontSize: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+
+        const SizedBox(height: 25),
+
+        // DAILY GOAL CARD
+
+        DailyGoalCard(studiedSeconds: studiedSeconds, goalMinutes: goalMinutes),
+
+        const SizedBox(height: 20),
+
+        // QUICK ACTIONS
+
+        const SectionTitle(title: 'Quick Actions'),
+
+        const SizedBox(height: 12),
+
+        Row(
+          children: [
+
+            Expanded(
+              child: QuickActionCard(
+                icon: Icons.add_task,
+                title: 'Add Assignment',
+                onTap: onAddAssignment,
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            Expanded(
+              child: QuickActionCard(
+                icon: Icons.play_circle_outline,
+                title: 'Start Studying',
+                onTap: onOpenStudy,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 25),
+
+        // ASSIGNMENT PROGRESS
+
+        const SectionTitle(title: 'Assignment Progress'),
+
+        const SizedBox(height: 12),
+
+        Card(
+          elevation: 0,
+          color: Theme.of(context).colorScheme.surface,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+
+                Row(
+                  mainAxisAlignment:
+                  MainAxisAlignment.spaceBetween,
+                  children: [
+
+                    const Text(
+                      'Completed assignments',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    Text(
+                      '$completedCount / $totalCount',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 15),
+
+                LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 9,
+                  borderRadius: BorderRadius.circular(10),
+                  backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: const Color(0xFF397D78),
+                ),
+
+                const SizedBox(height: 10),
+
+                Text(
+                  '${(progress * 100).round()}% completed',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 25),
+
+        // UPCOMING ASSIGNMENTS
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+
+            const SectionTitle(
+              title: 'Upcoming Assignments',
+            ),
+
+            TextButton(
+              onPressed: onOpenAcademics,
+              child: const Text('View all'),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 8),
+
+        if (upcomingAssignments.isEmpty)
+
+          const Card(
+            elevation: 0,
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'No upcoming assignments. You are all caught up!',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          )
+
+        else
+
+          ...upcomingAssignments.take(4).map(
+                (assignment) {
+
+              return AssignmentCard(
+                assignment: assignment,
+                onToggle: () {
+                  onToggleAssignment(assignment);
+                },
+              );
+            },
+          ),
+
+        const SizedBox(height: 25),
+
+        // WEATHER PLACEHOLDER
+
+        const SectionTitle(title: 'Campus Weather'),
+
+        const SizedBox(height: 12),
+
+        Card(
+          elevation: 0,
+          color: Theme.of(context).colorScheme.secondaryContainer,
+
+          child: const Padding(
+            padding: EdgeInsets.all(20),
+
+            child: Row(
+              children: [
+
+                Icon(
+                  Icons.cloud_outlined,
+                  size: 45,
+                  color: Color(0xFF397D78),
+                ),
+
+                SizedBox(width: 18),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+
+                      Text(
+                        'Weather information',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+
+                      SizedBox(height: 5),
+
+                      Text(
+                        'Live campus weather will appear here.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+}
