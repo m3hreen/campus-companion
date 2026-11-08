@@ -26,10 +26,16 @@ class _StudyScreenState extends State<StudyScreen> {
   String? _course;
   int _minutes = 25;
   bool _finished = false;
+  bool _stopwatchMode = false;
 
-  int get _elapsed => _watch.elapsed.inSeconds.clamp(0, _minutes * 60).toInt();
-  int get _remaining => _minutes * 60 - _elapsed;
+  // Actual elapsed time, used when saving sessions
+  int get _elapsed => _watch.elapsed.inSeconds;
+
+  int get _remaining => (_minutes * 60 - _elapsed).clamp(0, _minutes * 60).toInt();
   bool get _hasSession => _watch.isRunning || _watch.elapsedMicroseconds > 0;
+
+  // displayed time depends on the selected mode
+  int get _displaySeconds => _stopwatchMode ? _elapsed : _remaining;
 
   void _message(String text) {
     ScaffoldMessenger.of(context)
@@ -38,13 +44,18 @@ class _StudyScreenState extends State<StudyScreen> {
   }
 
   void _start() {
-    if (_course == null) { _message('Choose a course first'); return; }
+    if (_course == null) {
+      _message('Choose a course first');
+      return;
+    }
+
     if (_finished) return;
     _watch.start();
     _ticker?.cancel();
+
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      if (_remaining == 0) {
+      if (!_stopwatchMode && _remaining == 0) {
         _watch.stop();
         _ticker?.cancel();
         _finished = true;
@@ -71,7 +82,8 @@ class _StudyScreenState extends State<StudyScreen> {
   Future<void> _reset() async {
     if (!_hasSession) return;
     final bool? discard = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      title: const Text('Reset timer?'), content: const Text('Unsaved study time will be discarded.'),
+      title: Text(_stopwatchMode ? 'Reset stopwatch?' : 'Reset timer?',),
+        content: const Text('Unsaved study time will be discarded.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
         FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Reset')),
@@ -135,15 +147,66 @@ class _StudyScreenState extends State<StudyScreen> {
           child: Text(course, overflow: TextOverflow.ellipsis))).toList(),
         onChanged: _hasSession ? null : (String? value) => setState(() { _course = value; })),
       const SizedBox(height: 16),
-      DropdownButtonFormField<int>(initialValue: _minutes,
-        decoration: const InputDecoration(labelText: 'Session length'),
-        items: [1, 5, 15, 25, 45, 60].map((int minutes) => DropdownMenuItem(
-          value: minutes, child: Text('$minutes minutes'))).toList(),
-        onChanged: _hasSession ? null : (int? value) => setState(() { _minutes = value ?? 25; })),
-      const SizedBox(height: 24),
-      Center(child: Text('${(_remaining ~/ 60).toString().padLeft(2, '0')}:${(_remaining % 60).toString().padLeft(2, '0')}',
-        style: Theme.of(context).textTheme.displayLarge)),
-      Center(child: Text(_finished ? 'Complete — save your session' : _watch.isRunning ? 'Studying' : _hasSession ? 'Paused' : 'Ready to study')),
+      // Choose between Timer and Stopwatch
+      SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment<bool>(
+            value: false,
+            label: Text('Timer'),
+            icon: Icon(Icons.timer_outlined),
+          ),
+          ButtonSegment<bool>(
+            value: true,
+            label: Text('Stopwatch'),
+            icon: Icon(Icons.timer),
+          ),
+        ],
+        selected: {_stopwatchMode},
+        onSelectionChanged: _hasSession
+            ? null
+            : (Set<bool> selection) {
+          setState(() {
+            _stopwatchMode = selection.first;
+            _finished = false;
+          });
+        },
+      ),
+      const SizedBox(height: 16),
+
+      if (!_stopwatchMode) ...[
+        DropdownButtonFormField<int>(
+          initialValue: _minutes,
+          decoration: const InputDecoration(labelText: 'Session length',),
+          items: [1, 5, 15, 25, 45, 60].map((int minutes) => DropdownMenuItem(
+            value: minutes,
+            child: Text('$minutes minutes'),
+          )).toList(),
+          onChanged: _hasSession ? null : (int? value) {
+            setState(() {
+              _minutes = value ?? 25;
+            });
+          },
+        ),
+        const SizedBox(height: 24),
+      ] else
+        const SizedBox(height: 24),
+      Center(
+        child: Text(
+          '${(_displaySeconds ~/ 60).toString().padLeft(2, '0')}:${(_displaySeconds % 60).toString().padLeft(2, '0')}',
+          style: Theme.of(context).textTheme.displayLarge,
+        ),
+      ),
+      Center(
+        child: Text(
+          _finished
+              ? 'Complete — save your session'
+              : _watch.isRunning
+              ? (_stopwatchMode ? 'Stopwatch running' : 'Studying')
+              : _hasSession
+              ? 'Paused'
+              : 'Ready to study',
+        ),
+      ),
       const SizedBox(height: 16),
       Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
         FilledButton.icon(onPressed: _finished ? null : _watch.isRunning ? _pause : _start,
