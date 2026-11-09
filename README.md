@@ -6,6 +6,8 @@ From the repository root:
 
 ```bash
 cd code
+flutter pub add url_launcher
+flutter pub add shared_preferences
 flutter pub get
 flutter analyze
 flutter test
