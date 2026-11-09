@@ -1,20 +1,19 @@
-// Own the shared assignment list and selected tab. Pass data and callbacks to HomeScreen.
-
 import 'package:flutter/material.dart';
-import '../models/assignment.dart';
+
 import '../dialogs/add_assignment_dialog.dart';
+import '../dialogs/add_course_dialog.dart';
+import '../models/assignment.dart';
+import '../models/study_session.dart';
+import '../utils/app_feedback.dart';
+import '../widgets/app_drawer.dart';
+import 'academics_screen.dart';
+import 'campus_directory_screen.dart';
 import 'home_screen.dart';
-import 'placeholder_page.dart';
+import 'insights_screen.dart';
 import 'settings_screen.dart';
 import 'study_screen.dart';
-import 'insights_screen.dart';
-import '../models/study_session.dart';
-import 'academics_screen.dart';
-import '../dialogs/add_course_dialog.dart';
-import '../widgets/app_drawer.dart';
-import '../utils/app_feedback.dart';
-import 'campus_directory_screen.dart';
 
+// Holds the information shared by the app's main screens.
 class MainScreen extends StatefulWidget {
   const MainScreen({
     super.key,
@@ -30,100 +29,27 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
+  // Start on Home, the first page in the list.
+  int _selectedIndex = 0;
 
-  int selectedIndex = 0;
-  final List<StudySession> _sessions = [];
-  int _goalMinutes = 120;
+  // Keep these titles in the same order as the pages and bottom tabs.
+  static const List<String> _pageTitles = [
+    'Home',
+    'Academics',
+    'Study',
+    'Insights',
+    'Campus Map',
+    'Settings',
+  ];
 
-  // Attribute a saved session to its completion date. Unsaved time is excluded.
-  int get _todayStudySeconds {
-    final DateTime today = DateTime.now();
-    return _sessions.where((StudySession session) =>
-      session.completedAt.year == today.year && session.completedAt.month == today.month &&
-      session.completedAt.day == today.day
-    ).fold<int>(0, (int total, StudySession session) => total + session.seconds);
-  }
-
-  void _saveStudySession(StudySession session) {
-    setState(() { _sessions.add(session); });
-    _feedback('Study session saved');
-  }
-
-  void _changeGoal(int minutes) {
-    setState(() { _goalMinutes = minutes; });
-    _feedback('Daily goal updated');
-  }
-
-
-  final List<String> courses = [
+  // Give the user some example courses and assignments on their first visit.
+  final List<String> _courses = [
     'DEMO101 - Computer Graphics',
     'CSCI3101U - Mobile Devices',
     'DEMO102 - Machine Learning',
   ];
 
-  void _feedback(String message) {
-    showAppFeedback(context, message);
-  }
-
-  Future<void> _addCourse() async {
-    final String? course = await showDialog<String>(
-      context: context, builder: (_) => AddCourseDialog(courses: courses));
-    if (!mounted || course == null) return;
-    setState(() { courses.add(course); });
-    _feedback('Course added');
-  }
-
-  Future<void> _editAssignment(Assignment assignment) async {
-    final Assignment? updated = await showDialog<Assignment>(
-      context: context,
-      builder: (_) => AddAssignmentDialog(courses: courses, assignment: assignment));
-    if (!mounted || updated == null) return;
-    final int index = assignments.indexOf(assignment);
-    if (index < 0) return;
-    setState(() { assignments[index] = updated; });
-    _feedback('Assignment updated');
-  }
-
-  // Revisions stop an old queued Undo from reversing a newer checkbox change.
-  final Map<Assignment, int> _completionRevisions = {};
-
-  void _toggleAssignment(Assignment assignment) {
-    final bool previous = assignment.isCompleted;
-    final int revision = (_completionRevisions[assignment] ?? 0) + 1;
-    setState(() {
-      assignment.isCompleted = !previous;
-      _completionRevisions[assignment] = revision;
-    });
-    showAppFeedback(context, assignment.isCompleted ? 'Assignment completed' : 'Assignment marked incomplete', onUndo: () {
-      if (!mounted || !assignments.contains(assignment) || _completionRevisions[assignment] != revision) return;
-      setState(() {
-        assignment.isCompleted = previous;
-        _completionRevisions[assignment] = revision + 1;
-      });
-    });
-  }
-
-  Future<void> _deleteAssignment(Assignment assignment) async {
-    final bool? confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      title: const Text('Delete assignment?'), content: Text('Delete "${assignment.title}"?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete')),
-      ]));
-    if (!mounted || confirmed != true) return;
-    final int index = assignments.indexOf(assignment);
-    if (index < 0) return;
-    setState(() { assignments.removeAt(index); });
-    showAppFeedback(context, 'Assignment deleted', onUndo: () {
-      if (!mounted || assignments.contains(assignment)) return;
-      setState(() { assignments.insert(index <= assignments.length ? index : assignments.length, assignment); });
-    });
-  }
-
-  // Temporary sample assignments.
-  // Later these will come from local/cloud storage.
-
-  final List<Assignment> assignments = [
+  final List<Assignment> _assignments = [
     Assignment(
       title: 'Computer Graphics Project',
       course: 'DEMO101 - Computer Graphics',
@@ -141,88 +67,218 @@ class _MainScreenState extends State<MainScreen> {
     ),
   ];
 
-  final List<String> pageTitles = [
-    'Home',
-    'Academics',
-    'Study',
-    'Insights',
-    'Campus Map',
-    'Settings',
-  ];
+  final List<StudySession> _sessions = [];
+  int _goalMinutes = 120;
 
-  // --------------------------------------------------
-  // ADD ASSIGNMENT DIALOG
-  // --------------------------------------------------
+  // Count checkbox changes so an older Undo can't reverse a newer change.
+  final Map<Assignment, int> _completionRevisions = {};
 
-  Future<void> addAssignment() async {
-    final newAssignment = await showDialog<Assignment>(
-      context: context,
-      builder: (dialogContext) {
-        return AddAssignmentDialog(courses: courses);
-      },
-    );
-
-    if (!mounted) return;
-
-    if (newAssignment != null) {
-      setState(() {
-        assignments.add(newAssignment);
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Assignment added successfully!'),
-        ),
-      );
-    }
+  void _selectPage(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
   }
 
+  // Add up the time from saved sessions that finished today.
+  int get _todayStudySeconds {
+    final DateTime today = DateTime.now();
+    int total = 0;
 
+    for (final StudySession session in _sessions) {
+      final DateTime finished = session.completedAt;
+      if (finished.year == today.year &&
+          finished.month == today.month &&
+          finished.day == today.day) {
+        total += session.seconds;
+      }
+    }
 
-  // --------------------------------------------------
-  // BUILD MAIN APPLICATION
-  // --------------------------------------------------
+    return total;
+  }
+
+  void _saveStudySession(StudySession session) {
+    setState(() {
+      _sessions.add(session);
+    });
+
+    showAppFeedback(context, 'Study session saved');
+  }
+
+  void _changeGoal(int minutes) {
+    setState(() {
+      _goalMinutes = minutes;
+    });
+
+    showAppFeedback(context, 'Daily goal updated');
+  }
+
+  Future<void> _addCourse() async {
+    final String? course = await showDialog<String>(
+      context: context,
+      builder: (_) => AddCourseDialog(courses: _courses),
+    );
+
+    // Cancel returns no course. Also check that this screen is still open.
+    if (!mounted || course == null) return;
+
+    setState(() {
+      _courses.add(course);
+    });
+
+    showAppFeedback(context, 'Course added');
+  }
+
+  Future<void> _addAssignment() async {
+    final Assignment? newAssignment = await showDialog<Assignment>(
+      context: context,
+      builder: (_) => AddAssignmentDialog(courses: _courses),
+    );
+
+    if (!mounted || newAssignment == null) return;
+
+    setState(() {
+      _assignments.add(newAssignment);
+    });
+
+    showAppFeedback(context, 'Assignment added successfully!');
+  }
+
+  Future<void> _editAssignment(Assignment assignment) async {
+    final Assignment? updated = await showDialog<Assignment>(
+      context: context,
+      builder: (_) => AddAssignmentDialog(
+        courses: _courses,
+        assignment: assignment,
+      ),
+    );
+
+    if (!mounted || updated == null) return;
+
+    // Replace the original assignment in the same spot in the list.
+    final int index = _assignments.indexOf(assignment);
+    if (index < 0) return;
+
+    setState(() {
+      _assignments[index] = updated;
+    });
+
+    showAppFeedback(context, 'Assignment updated');
+  }
+
+  void _toggleAssignment(Assignment assignment) {
+    final bool wasCompleted = assignment.isCompleted;
+    final int revision = (_completionRevisions[assignment] ?? 0) + 1;
+
+    setState(() {
+      assignment.isCompleted = !wasCompleted;
+      _completionRevisions[assignment] = revision;
+    });
+
+    final String message = assignment.isCompleted
+        ? 'Assignment completed'
+        : 'Assignment marked incomplete';
+
+    showAppFeedback(
+      context,
+      message,
+      onUndo: () {
+        // Undo only if the assignment still exists and this was its last change.
+        if (!mounted ||
+            !_assignments.contains(assignment) ||
+            _completionRevisions[assignment] != revision) {
+          return;
+        }
+
+        setState(() {
+          assignment.isCompleted = wasCompleted;
+          _completionRevisions[assignment] = revision + 1;
+        });
+      },
+    );
+  }
+
+  Future<void> _deleteAssignment(Assignment assignment) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete assignment?'),
+        content: Text('Delete "${assignment.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    final int index = _assignments.indexOf(assignment);
+    if (index < 0) return;
+
+    setState(() {
+      _assignments.removeAt(index);
+    });
+
+    showAppFeedback(
+      context,
+      'Assignment deleted',
+      onUndo: () {
+        if (!mounted || _assignments.contains(assignment)) return;
+
+        // Put it back in its old spot, or at the end if the list got shorter.
+        final int restoreIndex =
+        index <= _assignments.length ? index : _assignments.length;
+
+        setState(() {
+          _assignments.insert(restoreIndex, assignment);
+        });
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final int studiedSeconds = _todayStudySeconds;
 
+    // Give each page the information and actions it needs.
     final List<Widget> pages = [
-
       HomeScreen(
-        assignments: assignments,
-        studiedSeconds: _todayStudySeconds,
+        assignments: _assignments,
+        studiedSeconds: studiedSeconds,
         goalMinutes: _goalMinutes,
-        onAddAssignment: addAssignment,
-        onOpenAcademics: () {
-          setState(() {
-            selectedIndex = 1;
-          });
-        },
-        onOpenStudy: () {
-          setState(() {
-            selectedIndex = 2;
-          });
-        },
+        onAddAssignment: _addAssignment,
+        onOpenAcademics: () => _selectPage(1),
+        onOpenStudy: () => _selectPage(2),
         onToggleAssignment: _toggleAssignment,
       ),
-
       AcademicsScreen(
-        courses: courses, assignments: assignments,
-        onAddCourse: _addCourse, onAddAssignment: addAssignment,
-        onEdit: _editAssignment, onDelete: _deleteAssignment,
+        courses: _courses,
+        assignments: _assignments,
+        onAddCourse: _addCourse,
+        onAddAssignment: _addAssignment,
+        onEdit: _editAssignment,
+        onDelete: _deleteAssignment,
         onToggle: _toggleAssignment,
       ),
-
       StudyScreen(
-        courses: courses, sessions: _sessions, goalMinutes: _goalMinutes,
-        studiedSeconds: _todayStudySeconds,
-        onSaveSession: _saveStudySession, onGoalChanged: _changeGoal,
+        courses: _courses,
+        sessions: _sessions,
+        goalMinutes: _goalMinutes,
+        studiedSeconds: studiedSeconds,
+        onSaveSession: _saveStudySession,
+        onGoalChanged: _changeGoal,
       ),
-
-      InsightsScreen(assignments: assignments, sessions: _sessions),
-
+      InsightsScreen(
+        assignments: _assignments,
+        sessions: _sessions,
+      ),
       const CampusDirectoryScreen(),
-
       SettingsScreen(
         darkMode: widget.darkMode,
         onDarkModeChanged: widget.onDarkModeChanged,
@@ -231,71 +287,52 @@ class _MainScreenState extends State<MainScreen> {
 
     return Scaffold(
       drawer: AppDrawer(
-        selectedIndex: selectedIndex,
-        onPageSelected: (int index) {
-          setState(() {
-            selectedIndex = index;
-          });
-        },
+        selectedIndex: _selectedIndex,
+        onPageSelected: _selectPage,
         darkMode: widget.darkMode,
         onDarkModeChanged: widget.onDarkModeChanged,
       ),
-
       appBar: AppBar(
         title: Text(
-          pageTitles[selectedIndex],
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          _pageTitles[_selectedIndex],
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
 
+      // Keep the other pages open so the study timer can keep running.
       body: IndexedStack(
-        index: selectedIndex,
+        index: _selectedIndex,
         children: pages,
       ),
-
       bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
-
-        onDestinationSelected: (index) {
-          setState(() {
-            selectedIndex = index;
-          });
-        },
-
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: _selectPage,
         destinations: const [
-
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home),
             label: 'Home',
           ),
-
           NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book),
             label: 'Academics',
           ),
-
           NavigationDestination(
             icon: Icon(Icons.timer_outlined),
             selectedIcon: Icon(Icons.timer),
             label: 'Study',
           ),
-
           NavigationDestination(
             icon: Icon(Icons.bar_chart_outlined),
             selectedIcon: Icon(Icons.bar_chart),
             label: 'Insights',
           ),
-
           NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'Map',
           ),
-
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),

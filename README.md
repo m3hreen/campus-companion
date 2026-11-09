@@ -52,4 +52,4 @@ This is a working code package, not the completed Canvas submission. Add a progr
 
 ## AI acknowledgement
 
-WE STILL NEED TO ADD!!!!!!!!!!
+We used ChatGPT to help organize and clean up our Flutter code, improve indentation, and add comments. It also helped us connect files and screens, set up navigation, and understand how data and user actions flow between pages. We used our class examples and lab exercises as references for the Flutter patterns in the app, including forms, dialogs, navigation, and screen layouts.
