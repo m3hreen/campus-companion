@@ -13,6 +13,7 @@ import 'academics_screen.dart';
 import '../dialogs/add_course_dialog.dart';
 import '../widgets/app_drawer.dart';
 import '../utils/app_feedback.dart';
+import 'campus_directory_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({
@@ -220,11 +221,7 @@ class _MainScreenState extends State<MainScreen> {
 
       InsightsScreen(assignments: assignments, sessions: _sessions),
 
-      const PlaceholderPage(
-        icon: Icons.map_outlined,
-        description:
-        'Find study spaces, buildings and services on campus.',
-      ),
+      const CampusDirectoryScreen(),
 
       SettingsScreen(
         darkMode: widget.darkMode,
