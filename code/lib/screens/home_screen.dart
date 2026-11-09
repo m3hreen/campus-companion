@@ -1,24 +1,13 @@
-// Display assignment data from MainScreen. Callbacks ask the parent to update state or navigate.
-
 import 'package:flutter/material.dart';
+
 import '../models/assignment.dart';
+import '../widgets/assignment_card.dart';
 import '../widgets/daily_goal_card.dart';
 import '../widgets/quick_action_card.dart';
 import '../widgets/section_title.dart';
-import '../widgets/assignment_card.dart';
 
+// Shows the study goal and assignments that MainScreen passes in.
 class HomeScreen extends StatelessWidget {
-
-  final List<Assignment> assignments;
-  final int studiedSeconds;
-  final int goalMinutes;
-
-  final VoidCallback onAddAssignment;
-  final VoidCallback onOpenAcademics;
-  final VoidCallback onOpenStudy;
-
-  final Function(Assignment) onToggleAssignment;
-
   const HomeScreen({
     super.key,
     required this.assignments,
@@ -30,29 +19,34 @@ class HomeScreen extends StatelessWidget {
     required this.onToggleAssignment,
   });
 
+  final List<Assignment> assignments;
+  final int studiedSeconds;
+  final int goalMinutes;
+
+  // MainScreen handles these actions when the user taps something on Home.
+  final VoidCallback onAddAssignment;
+  final VoidCallback onOpenAcademics;
+  final VoidCallback onOpenStudy;
+  final ValueChanged<Assignment> onToggleAssignment;
+
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final int completedCount =
+        assignments.where((assignment) => assignment.isCompleted).length;
+    final int totalCount = assignments.length;
 
-    final completedCount =
-        assignments.where((a) => a.isCompleted).length;
-
-    final totalCount = assignments.length;
-
-    final progress = totalCount == 0
-        ? 0.0
-        : completedCount / totalCount;
-
-    final upcomingAssignments = assignments
-        .where((a) => !a.isCompleted)
-        .toList()
-      ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    // Use a new list so sorting here doesn't change the shared list.
+    final List<Assignment> upcomingAssignments = assignments
+        .where((assignment) => !assignment.isCompleted)
+        .toList();
+    upcomingAssignments.sort(
+          (first, second) => first.dueDate.compareTo(second.dueDate),
+    );
 
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-
-        // WELCOME SECTION
-
         const Text(
           'Welcome back!',
           style: TextStyle(
@@ -60,34 +54,24 @@ class HomeScreen extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
-
         const SizedBox(height: 5),
-
         Text(
           'Here is your campus overview for today.',
           style: TextStyle(
             fontSize: 14,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            color: colors.onSurfaceVariant,
           ),
         ),
-
         const SizedBox(height: 25),
-
-        // DAILY GOAL CARD
-
-        DailyGoalCard(studiedSeconds: studiedSeconds, goalMinutes: goalMinutes),
-
+        DailyGoalCard(
+          studiedSeconds: studiedSeconds,
+          goalMinutes: goalMinutes,
+        ),
         const SizedBox(height: 20),
-
-        // QUICK ACTIONS
-
         const SectionTitle(title: 'Quick Actions'),
-
         const SizedBox(height: 12),
-
         Row(
           children: [
-
             Expanded(
               child: QuickActionCard(
                 icon: Icons.add_task,
@@ -95,9 +79,7 @@ class HomeScreen extends StatelessWidget {
                 onTap: onAddAssignment,
               ),
             ),
-
             const SizedBox(width: 12),
-
             Expanded(
               child: QuickActionCard(
                 icon: Icons.play_circle_outline,
@@ -107,93 +89,23 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
-
         const SizedBox(height: 25),
-
-        // ASSIGNMENT PROGRESS
-
         const SectionTitle(title: 'Assignment Progress'),
-
         const SizedBox(height: 12),
-
-        Card(
-          elevation: 0,
-          color: Theme.of(context).colorScheme.surface,
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-
-                Row(
-                  mainAxisAlignment:
-                  MainAxisAlignment.spaceBetween,
-                  children: [
-
-                    const Text(
-                      'Completed assignments',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-
-                    Text(
-                      '$completedCount / $totalCount',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 15),
-
-                LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 9,
-                  borderRadius: BorderRadius.circular(10),
-                  backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  color: const Color(0xFF397D78),
-                ),
-
-                const SizedBox(height: 10),
-
-                Text(
-                  '${(progress * 100).round()}% completed',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
+        _buildProgressCard(colors, completedCount, totalCount),
         const SizedBox(height: 25),
-
-        // UPCOMING ASSIGNMENTS
-
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-
-            const SectionTitle(
-              title: 'Upcoming Assignments',
-            ),
-
+            const SectionTitle(title: 'Upcoming Assignments'),
             TextButton(
               onPressed: onOpenAcademics,
               child: const Text('View all'),
             ),
           ],
         ),
-
         const SizedBox(height: 8),
-
         if (upcomingAssignments.isEmpty)
-
           const Card(
             elevation: 0,
             child: Padding(
@@ -203,78 +115,114 @@ class HomeScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
             ),
-          )
+          ),
 
-        else
-
-          ...upcomingAssignments.take(4).map(
-                (assignment) {
-
-              return AssignmentCard(
-                assignment: assignment,
-                onToggle: () {
-                  onToggleAssignment(assignment);
-                },
-              );
-            },
+        // Keep the dashboard short by showing only the first four.
+        for (final Assignment assignment in upcomingAssignments.take(4))
+          AssignmentCard(
+            assignment: assignment,
+            onToggle: () => onToggleAssignment(assignment),
           ),
 
         const SizedBox(height: 25),
-
-        // WEATHER PLACEHOLDER
-
         const SectionTitle(title: 'Campus Weather'),
-
         const SizedBox(height: 12),
+        _buildWeatherCard(colors),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
-        Card(
-          elevation: 0,
-          color: Theme.of(context).colorScheme.secondaryContainer,
+  Widget _buildProgressCard(
+      ColorScheme colors,
+      int completedCount,
+      int totalCount,
+      ) {
+    // Show 0% when the list is empty so we don't divide by zero.
+    final double progress =
+    totalCount == 0 ? 0.0 : completedCount / totalCount;
+    final int percentCompleted = (progress * 100).round();
 
-          child: const Padding(
-            padding: EdgeInsets.all(20),
-
-            child: Row(
+    return Card(
+      elevation: 0,
+      color: colors.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-
-                Icon(
-                  Icons.cloud_outlined,
-                  size: 45,
-                  color: Color(0xFF397D78),
+                const Text(
+                  'Completed assignments',
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
-
-                SizedBox(width: 18),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                    children: [
-
-                      Text(
-                        'Weather information',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-
-                      SizedBox(height: 5),
-
-                      Text(
-                        'Live campus weather will appear here.',
-                        style: TextStyle(fontSize: 13),
-                      ),
-                    ],
-                  ),
+                Text(
+                  '$completedCount / $totalCount',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 15),
+            LinearProgressIndicator(
+              value: progress,
+              minHeight: 9,
+              borderRadius: BorderRadius.circular(10),
+              backgroundColor: colors.surfaceContainerHighest,
+              color: const Color(0xFF397D78),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '$percentCompleted% completed',
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
 
-        const SizedBox(height: 20),
-      ],
+  // This card holds the spot where live weather will go.
+  Widget _buildWeatherCard(ColorScheme colors) {
+    return Card(
+      elevation: 0,
+      color: colors.secondaryContainer,
+      child: const Padding(
+        padding: EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(
+              Icons.cloud_outlined,
+              size: 45,
+              color: Color(0xFF397D78),
+            ),
+            SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Weather information',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    'Live campus weather will appear here.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
