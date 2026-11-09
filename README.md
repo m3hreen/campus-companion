@@ -51,13 +51,7 @@ Existing Home, Academics, Study, Insights, drawer and settings features are reta
 
 ---
 
-## Verification status
 
-Local import and delimiter checks were performed in the editing environment. Flutter/Dart are not installed there, so `flutter analyze`, `flutter test`, Android build and visual verification have **NOT** been executed.
-
-Run the commands above on your development machine and resolve any failures before submission.
-
----
 
 ## Manual regression checks
 
@@ -86,37 +80,12 @@ Run the commands above on your development machine and resolve any failures befo
 - No device notifications, cloud/local persistence, weather HTTP integration or login.
 - Timer completion is in-app feedback; suspended apps may show it only on resuming.
 - Course rename/delete is not implemented.
-- Campus Map is still a placeholder.
-- These remain separate group tasks.
 - Sessions are attributed to their completion date.
 - Snackbars are queued and can appear later if several actions occur quickly.
 
 ---
 
-## Part 2 submission still required
 
-This is a working code package, not the completed Canvas submission.
-
-### 1. Progress Report PDF
-
-Cover completed/remaining work (owners/dates), changes, known issues and actual member contributions.
-
-### 2. Demo Video
-
-- Record the exact version on Android as an MP4 of at most 2 minutes.
-- Include captions.
-
-### 3. Submission ZIP
-
-Include `README.md`, `report/`, `video/` and `code/` in `GroupXX_CampusCompanion_Part2.zip`.
-
-### 4. Final Packaging
-
-- Run `flutter clean` before packaging.
-- Exclude `build` and `.dart_tool`.
-- Verify by unzipping and building on another machine.
-
----
 
 ## AI acknowledgement
 
