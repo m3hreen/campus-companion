@@ -1,73 +1,113 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:code/main.dart';
 import 'package:code/utils/app_feedback.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const MethodChannel notificationChannel = MethodChannel(
+    'dexterous.com/flutter/local_notifications',
+  );
+
+  setUp(() {
+    // Start each test with empty storage, independent of device settings.
+    SharedPreferences.setMockInitialValues({});
+
+    // Widget tests have no Android notification service.
+    // Simulate normal startup without requesting real permissions.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(notificationChannel, (call) async {
+          switch (call.method) {
+            case 'initialize':
+              return true;
+            case 'getNotificationAppLaunchDetails':
+              return {'notificationLaunchedApp': false};
+            case 'areNotificationsEnabled':
+            case 'requestNotificationsPermission':
+              return false;
+            default:
+              return null;
+          }
+        });
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(notificationChannel, null);
+  });
+
   testWidgets('Begin opens the dashboard', (WidgetTester tester) async {
     await tester.pumpWidget(const CampusCompanionApp());
 
-    final beginButton = find.text('Begin');
+    // Wait for saved settings and notification launch checks to finish.
+    await tester.pumpAndSettle();
+
+    final Finder beginButton = find.text('Begin');
     expect(beginButton, findsOneWidget);
 
-    // Scroll to Begin in case it's below the visible part of the screen.
+    // Begin may be below the visible area on a small test screen.
     await tester.ensureVisible(beginButton);
     await tester.pumpAndSettle();
 
     await tester.tap(beginButton);
+
+    // MainScreen also restores its saved data asynchronously.
     await tester.pumpAndSettle();
 
-    // The dashboard greeting should appear and the Begin button should be gone.
     expect(find.text('Welcome back!'), findsOneWidget);
     expect(beginButton, findsNothing);
+
+    // Dispose the app and any loading widgets before ending the test.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
   });
 
-  testWidgets(
-    'Timer feedback preserves the current Undo action',
-        (WidgetTester tester) async {
-      bool restored = false;
-      late BuildContext feedbackContext;
+  testWidgets('Timer feedback preserves the current Undo action', (
+    WidgetTester tester,
+  ) async {
+    bool restored = false;
+    late BuildContext feedbackContext;
 
-      // Set up a simple screen where the feedback messages can appear.
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Builder(
-              builder: (context) {
-                feedbackContext = context;
-                return const SizedBox();
-              },
-            ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) {
+              feedbackContext = context;
+              return const SizedBox.shrink();
+            },
           ),
         ),
-      );
+      ),
+    );
 
-      showAppFeedback(
-        feedbackContext,
-        'Assignment deleted',
-        onUndo: () {
-          restored = true;
-        },
-      );
-      await tester.pumpAndSettle();
+    showAppFeedback(
+      feedbackContext,
+      'Assignment deleted',
+      onUndo: () {
+        restored = true;
+      },
+    );
+    await tester.pumpAndSettle();
 
-      // The timer message should wait while Undo is still on screen.
-      showAppFeedback(feedbackContext, 'Timer complete!');
-      await tester.pump(const Duration(milliseconds: 500));
+    // Timer feedback must queue behind the visible deletion Undo.
+    showAppFeedback(feedbackContext, 'Timer complete!');
+    await tester.pump(const Duration(milliseconds: 500));
 
-      expect(find.text('Undo'), findsOneWidget);
-      expect(find.text('Timer complete!'), findsNothing);
+    expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('Timer complete!'), findsNothing);
 
-      await tester.tap(find.text('Undo'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
 
-      // Check that Undo ran and the waiting message is now visible.
-      expect(restored, isTrue);
-      expect(find.text('Timer complete!'), findsOneWidget);
+    expect(restored, isTrue);
+    expect(find.text('Timer complete!'), findsOneWidget);
 
-      // Remove the test screen so the remaining message is cleared.
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
 }
