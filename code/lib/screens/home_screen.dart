@@ -5,6 +5,7 @@ import '../widgets/assignment_card.dart';
 import '../widgets/daily_goal_card.dart';
 import '../widgets/quick_action_card.dart';
 import '../widgets/section_title.dart';
+import '../widgets/campus_weather_card.dart';
 
 // Shows the study goal and assignments that MainScreen passes in.
 class HomeScreen extends StatelessWidget {
@@ -32,8 +33,9 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    final int completedCount =
-        assignments.where((assignment) => assignment.isCompleted).length;
+    final int completedCount = assignments
+        .where((assignment) => assignment.isCompleted)
+        .length;
     final int totalCount = assignments.length;
 
     // Use a new list so sorting here doesn't change the shared list.
@@ -41,7 +43,7 @@ class HomeScreen extends StatelessWidget {
         .where((assignment) => !assignment.isCompleted)
         .toList();
     upcomingAssignments.sort(
-          (first, second) => first.dueDate.compareTo(second.dueDate),
+      (first, second) => first.dueDate.compareTo(second.dueDate),
     );
 
     return ListView(
@@ -49,24 +51,15 @@ class HomeScreen extends StatelessWidget {
       children: [
         const Text(
           'Welcome back!',
-          style: TextStyle(
-            fontSize: 27,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontSize: 27, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 5),
         Text(
           'Here is your campus overview for today.',
-          style: TextStyle(
-            fontSize: 14,
-            color: colors.onSurfaceVariant,
-          ),
+          style: TextStyle(fontSize: 14, color: colors.onSurfaceVariant),
         ),
         const SizedBox(height: 25),
-        DailyGoalCard(
-          studiedSeconds: studiedSeconds,
-          goalMinutes: goalMinutes,
-        ),
+        DailyGoalCard(studiedSeconds: studiedSeconds, goalMinutes: goalMinutes),
         const SizedBox(height: 20),
         const SectionTitle(title: 'Quick Actions'),
         const SizedBox(height: 12),
@@ -127,20 +120,19 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(height: 25),
         const SectionTitle(title: 'Campus Weather'),
         const SizedBox(height: 12),
-        _buildWeatherCard(colors),
+        const CampusWeatherCard(),
         const SizedBox(height: 20),
       ],
     );
   }
 
   Widget _buildProgressCard(
-      ColorScheme colors,
-      int completedCount,
-      int totalCount,
-      ) {
+    ColorScheme colors,
+    int completedCount,
+    int totalCount,
+  ) {
     // Show 0% when the list is empty so we don't divide by zero.
-    final double progress =
-    totalCount == 0 ? 0.0 : completedCount / totalCount;
+    final double progress = totalCount == 0 ? 0.0 : completedCount / totalCount;
     final int percentCompleted = (progress * 100).round();
 
     return Card(
@@ -175,50 +167,7 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               '$percentCompleted% completed',
-              style: TextStyle(
-                color: colors.onSurfaceVariant,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // This card holds the spot where live weather will go.
-  Widget _buildWeatherCard(ColorScheme colors) {
-    return Card(
-      elevation: 0,
-      color: colors.secondaryContainer,
-      child: const Padding(
-        padding: EdgeInsets.all(20),
-        child: Row(
-          children: [
-            Icon(
-              Icons.cloud_outlined,
-              size: 45,
-              color: Color(0xFF397D78),
-            ),
-            SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Weather information',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Live campus weather will appear here.',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ],
-              ),
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
             ),
           ],
         ),
