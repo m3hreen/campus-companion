@@ -8,9 +8,27 @@ class StudySession {
 
   final String course;
 
-  // Store time in seconds so short sessions still count.
+  // Store seconds so short sessions still count.
   final int seconds;
 
-  // Insights uses this date to decide which day the session counts toward.
+  // The completion date determines where the session appears in Insights.
   final DateTime completedAt;
+
+  // Convert the session into values that can be saved as JSON.
+  Map<String, dynamic> toJson() {
+    return {
+      'course': course,
+      'seconds': seconds,
+      'completedAt': completedAt.toIso8601String(),
+    };
+  }
+
+  // Restore the session, keeping its original duration and completion date.
+  factory StudySession.fromJson(Map<String, dynamic> json) {
+    return StudySession(
+      course: json['course'] as String,
+      seconds: json['seconds'] as int,
+      completedAt: DateTime.parse(json['completedAt'] as String),
+    );
+  }
 }
