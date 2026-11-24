@@ -55,8 +55,9 @@ class _AddAssignmentDialogState extends State<AddAssignmentDialog> {
 
     // Keep the current deadline available, even if it's outside the usual range.
     final DateTime earliest = _deadline.isBefore(now) ? _deadline : now;
-    final DateTime latest =
-    _deadline.isAfter(defaultLastDate) ? _deadline : defaultLastDate;
+    final DateTime latest = _deadline.isAfter(defaultLastDate)
+        ? _deadline
+        : defaultLastDate;
 
     final DateTime? date = await showDatePicker(
       context: context,
@@ -104,6 +105,9 @@ class _AddAssignmentDialogState extends State<AddAssignmentDialog> {
     if (!_formKey.currentState!.validate()) return;
 
     final Assignment assignment = Assignment(
+      // Keep the same notification ID when editing.
+      // New assignments receive an ID automatically.
+      id: widget.assignment?.id,
       title: _title.text.trim(),
       course: _course!,
       dueDate: _deadline,
@@ -111,7 +115,6 @@ class _AddAssignmentDialogState extends State<AddAssignmentDialog> {
       priority: _priority,
       isCompleted: widget.assignment?.isCompleted ?? false,
     );
-
     // Send the finished assignment back so MainScreen can update the list.
     Navigator.pop(context, assignment);
   }
@@ -165,7 +168,8 @@ class _AddAssignmentDialogState extends State<AddAssignmentDialog> {
                       _course = value;
                     });
                   },
-                  validator: (value) => value == null ? 'Choose a course' : null,
+                  validator: (value) =>
+                      value == null ? 'Choose a course' : null,
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -214,10 +218,7 @@ class _AddAssignmentDialogState extends State<AddAssignmentDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
+        FilledButton(onPressed: _save, child: const Text('Save')),
       ],
     );
   }

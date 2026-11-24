@@ -3,8 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'screens/main_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/notification_service.dart';
 
-// Sets up the app theme and decides which screen to show.
+// Sets up the theme and chooses the first screen.
 class CampusCompanionApp extends StatefulWidget {
   const CampusCompanionApp({super.key});
 
@@ -25,7 +26,7 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
   bool _themeLoadFailed = false;
   bool _themeSaveFailed = false;
 
-  // Save rapid theme changes in the same order they were made.
+  // Keep rapid theme changes in the order they were made.
   Future<void> _pendingThemeSave = Future<void>.value();
 
   @override
@@ -35,7 +36,7 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
   }
 
   // --------------------------------------------------
-  // LOAD AND SAVE DARK MODE
+  // RESTORE THEME AND CHECK HOW THE APP WAS OPENED
   // --------------------------------------------------
 
   Future<void> _loadTheme() async {
@@ -44,28 +45,57 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
       _themeLoadFailed = false;
     });
 
+    late final bool savedDarkMode;
+
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
 
-      final bool savedDarkMode = prefs.getBool(_darkModeKey) ?? false;
-
-      if (!mounted) return;
-
-      setState(() {
-        _darkMode = savedDarkMode;
-        _loadingTheme = false;
-      });
+      savedDarkMode = prefs.getBool(_darkModeKey) ?? false;
     } catch (_) {
       if (!mounted) return;
 
       setState(() {
         _themeLoadFailed = true;
       });
+
+      return;
     }
+
+    if (!mounted) return;
+
+    int? launchAssignmentId;
+
+    try {
+      // Initialize without requesting permission.
+      // MainScreen will open the assignment after its saved data loads.
+      launchAssignmentId = await NotificationService.instance
+          .getLaunchAssignmentId();
+    } catch (_) {
+      // Notification setup must not prevent the app from opening.
+      // MainScreen provides notification error feedback and Retry.
+      debugPrint('Could not check the notification launch.');
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _darkMode = savedDarkMode;
+
+      // A notification opens MainScreen directly.
+      // Normal launches still show Welcome.
+      if (launchAssignmentId != null) {
+        _hasBegun = true;
+      }
+
+      _loadingTheme = false;
+    });
   }
 
+  // --------------------------------------------------
+  // APPLY AND SAVE DARK MODE
+  // --------------------------------------------------
+
   void _setDarkMode(bool value) {
-    // Apply the change immediately across the app.
     setState(() {
       _darkMode = value;
     });
@@ -106,8 +136,6 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
   // WELCOME SCREEN
   // --------------------------------------------------
 
-  // Show Home when Begin is pressed.
-  // The welcome screen still appears on each fresh app launch.
   void _begin() {
     setState(() {
       _hasBegun = true;
@@ -130,7 +158,7 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
           : const Color(0xFF121817),
       appBarTheme: const AppBarTheme(elevation: 0, centerTitle: false),
 
-      // Keep inputs, buttons and cards consistent across screens.
+      // Use consistent shapes and spacing throughout the app.
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         contentPadding: const EdgeInsets.symmetric(
@@ -167,7 +195,7 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
       darkTheme: _buildTheme(Brightness.dark),
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
 
-      // Keep save failures visible and allow retrying the current choice.
+      // Keep failed theme saves visible until a retry succeeds.
       builder: (context, child) {
         return Column(
           children: [
@@ -197,7 +225,7 @@ class _CampusCompanionAppState extends State<CampusCompanionApp> {
         );
       },
 
-      // Load the saved theme before showing the welcome screen.
+      // Restore preferences and check notification launch details first.
       home: _loadingTheme
           ? Scaffold(
               body: Center(

@@ -7,6 +7,7 @@ import '../dialogs/add_assignment_dialog.dart';
 import '../dialogs/add_course_dialog.dart';
 import '../models/assignment.dart';
 import '../models/study_session.dart';
+import '../services/notification_service.dart';
 import '../utils/app_feedback.dart';
 import '../widgets/app_drawer.dart';
 import 'academics_screen.dart';
@@ -16,7 +17,7 @@ import 'insights_screen.dart';
 import 'settings_screen.dart';
 import 'study_screen.dart';
 
-// Owns the data shared by Home, Academics, Study and Insights.
+// Owns shared data, storage, navigation and assignment reminder callbacks.
 class MainScreen extends StatefulWidget {
   const MainScreen({
     super.key,
@@ -38,7 +39,6 @@ class _MainScreenState extends State<MainScreen> {
 
   int _selectedIndex = 0;
 
-  // Titles, pages and navigation destinations use the same order.
   static const List<String> _pageTitles = [
     'Home',
     'Academics',
@@ -55,11 +55,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // --------------------------------------------------
-  // SHARED APP DATA
+  // SHARED DATA
   // --------------------------------------------------
 
-  // Sample data is saved only when no academic save exists.
-  // Later launches restore the user's saved lists instead.
+  // Used only when no academic save exists.
   final List<String> _courses = [
     'DEMO101 - Computer Graphics',
     'CSCI3101U - Mobile Devices',
@@ -84,32 +83,51 @@ class _MainScreenState extends State<MainScreen> {
     ),
   ];
 
-  // Saved study history and the daily study goal.
   final List<StudySession> _sessions = [];
   int _goalMinutes = 120;
 
-  // Prevent an older Undo from reversing a newer completion change.
+  // An older Undo must not reverse a newer completion change.
   final Map<Assignment, int> _completionRevisions = {};
 
   // --------------------------------------------------
-  // LOCAL STORAGE
+  // STORAGE AND NOTIFICATION STATE
   // --------------------------------------------------
 
-  // Keep the existing key so earlier course and assignment saves still load.
   static const String _academicStorageKey = 'campus_academics_v1';
 
-  bool _loadingAcademics = true;
-  String? _storageError;
-  int _pendingSaveCount = 0;
+  final NotificationService _notifications = NotificationService.instance;
 
-  // Write snapshots in order so rapid changes save correctly.
+  bool _loadingAcademics = true;
+  bool _remindersEnabled = false;
+  bool _updatingReminders = false;
+
+  String? _storageError;
+  String? _notificationError;
+  String? _lastReminderSignature;
+
+  int _pendingSaveCount = 0;
+  int? _pendingNotificationTap;
+
+  // Serialize saves and scheduling so rapid edits finish in the correct order.
   Future<void> _pendingSave = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
+
+    _notifications.onAssignmentTapped = _handleNotificationTap;
     _loadAcademics();
   }
+
+  @override
+  void dispose() {
+    _notifications.onAssignmentTapped = null;
+    super.dispose();
+  }
+
+  // --------------------------------------------------
+  // RESTORE SAVED DATA
+  // --------------------------------------------------
 
   Future<void> _loadAcademics() async {
     setState(() {
@@ -124,43 +142,36 @@ class _MainScreenState extends State<MainScreen> {
 
       if (!mounted) return;
 
-      if (saved == null) {
-        // First launch: display and save the sample data.
-        setState(() {
-          _loadingAcademics = false;
-        });
+      if (saved != null) {
+        final Map<String, dynamic> data =
+            jsonDecode(saved) as Map<String, dynamic>;
 
-        _saveAcademics();
-        return;
-      }
+        // Decode everything before replacing the current state.
+        final List<String> courses = List<String>.from(data['courses'] as List);
 
-      final Map<String, dynamic> data =
-          jsonDecode(saved) as Map<String, dynamic>;
+        final List<Assignment> assignments = (data['assignments'] as List).map((
+          item,
+        ) {
+          return Assignment.fromJson(Map<String, dynamic>.from(item as Map));
+        }).toList();
 
-      // Decode everything before replacing the current state.
-      // A failed read leaves the existing saved data untouched.
-      final List<String> courses = List<String>.from(data['courses'] as List);
+        // Support older saves that do not contain these fields.
+        final List<StudySession> sessions = (data['sessions'] as List? ?? [])
+            .map((item) {
+              return StudySession.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              );
+            })
+            .toList();
 
-      final List<Assignment> assignments = (data['assignments'] as List).map((
-        item,
-      ) {
-        return Assignment.fromJson(Map<String, dynamic>.from(item as Map));
-      }).toList();
+        final int goalMinutes = data['goalMinutes'] as int? ?? 120;
+        final bool remindersEnabled =
+            data['remindersEnabled'] as bool? ?? false;
 
-      // Older saves have no sessions or goal, so use safe defaults.
-      final List<StudySession> sessions = (data['sessions'] as List? ?? []).map(
-        (item) {
-          return StudySession.fromJson(Map<String, dynamic>.from(item as Map));
-        },
-      ).toList();
+        if (goalMinutes < 1 || goalMinutes > 1440) {
+          throw const FormatException('Invalid daily study goal');
+        }
 
-      final int goalMinutes = data['goalMinutes'] as int? ?? 120;
-
-      if (goalMinutes < 1 || goalMinutes > 1440) {
-        throw const FormatException('Invalid daily study goal');
-      }
-
-      setState(() {
         _courses
           ..clear()
           ..addAll(courses);
@@ -174,28 +185,54 @@ class _MainScreenState extends State<MainScreen> {
           ..addAll(sessions);
 
         _goalMinutes = goalMinutes;
+        _remindersEnabled = remindersEnabled;
+      }
+
+      setState(() {
         _completionRevisions.clear();
         _loadingAcademics = false;
       });
     } catch (_) {
       if (!mounted) return;
 
+      // Do not overwrite saved data if reading or decoding fails.
       setState(() {
         _storageError = 'Could not load your saved app data. Please retry.';
       });
+
+      return;
     }
+
+    // Save newly generated IDs for older assignments before scheduling them.
+    // On a fresh installation, this also saves the sample data.
+    _saveAcademics();
+    _prepareNotificationTaps();
   }
 
-  void _saveAcademics() {
-    // Capture all values before another action changes the shared data.
+  // --------------------------------------------------
+  // SAVE DATA, THEN UPDATE REMINDERS
+  // --------------------------------------------------
+
+  Future<void> _saveAcademics() {
+    final List<Map<String, dynamic>> assignmentData = _assignments
+        .map((assignment) => assignment.toJson())
+        .toList();
+
+    final bool remindersEnabled = _remindersEnabled;
+
+    // Capture values now, before another action changes the shared data.
     final String snapshot = jsonEncode({
       'courses': List<String>.of(_courses),
-      'assignments': _assignments
-          .map((assignment) => assignment.toJson())
-          .toList(),
+      'assignments': assignmentData,
       'sessions': _sessions.map((session) => session.toJson()).toList(),
       'goalMinutes': _goalMinutes,
+      'remindersEnabled': remindersEnabled,
     });
+
+    // Separate objects prevent later checkbox changes affecting this save.
+    final List<Assignment> reminderAssignments = assignmentData
+        .map((data) => Assignment.fromJson(data))
+        .toList();
 
     setState(() {
       _pendingSaveCount++;
@@ -211,18 +248,37 @@ class _MainScreenState extends State<MainScreen> {
           throw StateError('Save failed');
         }
 
-        if (!mounted) return;
+        if (mounted) {
+          setState(() {
+            _storageError = null;
+          });
+        }
 
-        setState(() {
-          _storageError = null;
-        });
+        // Notification failures are reported separately from storage failures.
+        try {
+          await _synchronizeReminders(reminderAssignments, remindersEnabled);
+
+          if (mounted) {
+            setState(() {
+              _notificationError = null;
+            });
+          }
+        } catch (_) {
+          if (mounted) {
+            setState(() {
+              _notificationError =
+                  'Data saved, but reminders could not be updated. '
+                  'Check Android notification permission and tap Retry.';
+            });
+          }
+        }
       } catch (_) {
-        if (!mounted) return;
-
-        setState(() {
-          _storageError =
-              'Changes could not be saved. Retry before closing the app.';
-        });
+        if (mounted) {
+          setState(() {
+            _storageError =
+                'Changes could not be saved. Retry before closing the app.';
+          });
+        }
       } finally {
         if (mounted) {
           setState(() {
@@ -231,20 +287,251 @@ class _MainScreenState extends State<MainScreen> {
         }
       }
     });
+
+    return _pendingSave;
   }
 
-  // Update shared academic data and queue a save, including Undo changes.
   void _updateAcademics(VoidCallback change) {
     setState(change);
     _saveAcademics();
   }
 
   // --------------------------------------------------
-  // STUDY SESSIONS AND DAILY GOAL
+  // ENABLE OR DISABLE REMINDERS
   // --------------------------------------------------
 
-  // Count only saved sessions that finished today.
-  // Unsaved time from an active timer is excluded.
+  Future<void> _changeReminders(bool value) async {
+    if (_updatingReminders) return;
+
+    if (!_notifications.isSupported) {
+      showAppFeedback(
+        context,
+        'Assignment notifications are available on Android.',
+      );
+      return;
+    }
+
+    setState(() {
+      _updatingReminders = true;
+    });
+
+    try {
+      // Ask only after the user chooses to enable reminders.
+      if (value) {
+        final bool allowed = await _notifications.requestPermission();
+
+        if (!mounted) return;
+
+        if (!allowed) {
+          showAppFeedback(
+            context,
+            'Notifications are disabled. You can allow them in '
+            'Android Settings > Apps > Campus Companion > Notifications.',
+          );
+          return;
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _remindersEnabled = value;
+
+        // Force a refresh even if the assignment list has not changed.
+        _lastReminderSignature = null;
+      });
+
+      await _saveAcademics();
+
+      if (!mounted) return;
+
+      if (_storageError == null && _notificationError == null) {
+        showAppFeedback(
+          context,
+          value ? 'Assignment reminders enabled' : 'Assignment reminders off',
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      showAppFeedback(
+        context,
+        'Could not update notification permission. Please try again.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingReminders = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _synchronizeReminders(
+    List<Assignment> assignments,
+    bool enabled,
+  ) async {
+    if (!_notifications.isSupported) return;
+
+    // Changes to study history or goals do not require rebuilding reminders.
+    final String signature = jsonEncode({
+      'enabled': enabled,
+      'assignments': assignments.map((assignment) {
+        return {
+          'id': assignment.id,
+          'title': assignment.title,
+          'course': assignment.course,
+          'dueDate': assignment.dueDate.toIso8601String(),
+          'isCompleted': assignment.isCompleted,
+        };
+      }).toList(),
+    });
+
+    if (enabled && !await _notifications.notificationsAllowed()) {
+      throw StateError('Android notification permission is disabled');
+    }
+
+    if (signature == _lastReminderSignature) return;
+
+    // This service currently owns only assignment notifications.
+    // Rebuilding removes obsolete reminders after edits, deletion or Undo.
+    await _notifications.cancelAll();
+
+    if (enabled) {
+      for (final Assignment assignment in assignments) {
+        await _notifications.scheduleAssignment(assignment);
+      }
+    }
+
+    // Mark successful only after all scheduling operations finish.
+    _lastReminderSignature = signature;
+  }
+
+  // --------------------------------------------------
+  // SHOW A REMINDER NOW — LIKE THE CLASS BELL EXAMPLE
+  // --------------------------------------------------
+
+  Future<void> _showNextAssignmentReminder() async {
+    try {
+      if (!await _notifications.notificationsAllowed()) {
+        if (!mounted) return;
+
+        showAppFeedback(
+          context,
+          'Allow notifications in Android settings to show reminders.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+
+      final List<Assignment> incomplete = _assignments
+          .where((assignment) => !assignment.isCompleted)
+          .toList();
+
+      incomplete.sort(
+        (first, second) => first.dueDate.compareTo(second.dueDate),
+      );
+
+      if (incomplete.isEmpty) {
+        showAppFeedback(
+          context,
+          'No incomplete assignments to remind you about',
+        );
+        return;
+      }
+
+      await _notifications.showAssignment(incomplete.first);
+
+      if (!mounted) return;
+
+      showAppFeedback(context, 'Reminder sent. Check your notification shade.');
+    } catch (_) {
+      if (!mounted) return;
+
+      showAppFeedback(context, 'Could not show the assignment reminder');
+    }
+  }
+
+  // --------------------------------------------------
+  // OPEN THE ASSIGNMENT FROM A NOTIFICATION
+  // --------------------------------------------------
+
+  Future<void> _prepareNotificationTaps() async {
+    if (!_notifications.isSupported) return;
+
+    try {
+      await _notifications.initialize();
+
+      final int? launchId = await _notifications.getLaunchAssignmentId();
+
+      if (!mounted) return;
+
+      final int? assignmentId = _pendingNotificationTap ?? launchId;
+      _pendingNotificationTap = null;
+
+      if (assignmentId == null) return;
+
+      // Wait until the loaded MainScreen has been built before navigating.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _handleNotificationTap(assignmentId);
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _notificationError =
+            'Could not initialize assignment notifications. Tap Retry.';
+      });
+    }
+  }
+
+  void _handleNotificationTap(int assignmentId) {
+    if (!mounted) return;
+
+    if (_loadingAcademics) {
+      _pendingNotificationTap = assignmentId;
+      return;
+    }
+
+    Assignment? matchingAssignment;
+
+    for (final Assignment assignment in _assignments) {
+      if (assignment.id == assignmentId) {
+        matchingAssignment = assignment;
+        break;
+      }
+    }
+
+    if (matchingAssignment == null) {
+      showAppFeedback(context, 'This assignment is no longer available');
+      return;
+    }
+
+    final Assignment assignment = matchingAssignment;
+
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _AssignmentDetailsScreen(assignment: assignment),
+      ),
+    );
+  }
+
+  Future<void> _retryNotifications() async {
+    setState(() {
+      _lastReminderSignature = null;
+    });
+
+    await _saveAcademics();
+    await _prepareNotificationTaps();
+  }
+
+  // --------------------------------------------------
+  // STUDY SESSIONS AND GOALS
+  // --------------------------------------------------
+
   int get _todayStudySeconds {
     final DateTime today = DateTime.now();
     int total = 0;
@@ -262,7 +549,6 @@ class _MainScreenState extends State<MainScreen> {
     return total;
   }
 
-  // Save completed sessions so Home and Insights retain their history.
   void _saveStudySession(StudySession session) {
     _updateAcademics(() {
       _sessions.add(session);
@@ -271,7 +557,6 @@ class _MainScreenState extends State<MainScreen> {
     showAppFeedback(context, 'Study session saved');
   }
 
-  // Persist the goal whenever the user changes it.
   void _changeGoal(int minutes) {
     _updateAcademics(() {
       _goalMinutes = minutes;
@@ -281,7 +566,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // --------------------------------------------------
-  // ADD COURSE
+  // COURSES AND ASSIGNMENTS
   // --------------------------------------------------
 
   Future<void> _addCourse() async {
@@ -290,7 +575,6 @@ class _MainScreenState extends State<MainScreen> {
       builder: (_) => AddCourseDialog(courses: _courses),
     );
 
-    // Cancel returns null. Avoid updating a screen that has closed.
     if (!mounted || course == null) return;
 
     _updateAcademics(() {
@@ -300,20 +584,16 @@ class _MainScreenState extends State<MainScreen> {
     showAppFeedback(context, 'Course added');
   }
 
-  // --------------------------------------------------
-  // ADD AND EDIT ASSIGNMENTS
-  // --------------------------------------------------
-
   Future<void> _addAssignment() async {
-    final Assignment? newAssignment = await showDialog<Assignment>(
+    final Assignment? assignment = await showDialog<Assignment>(
       context: context,
       builder: (_) => AddAssignmentDialog(courses: _courses),
     );
 
-    if (!mounted || newAssignment == null) return;
+    if (!mounted || assignment == null) return;
 
     _updateAcademics(() {
-      _assignments.add(newAssignment);
+      _assignments.add(assignment);
     });
 
     showAppFeedback(context, 'Assignment added successfully!');
@@ -331,7 +611,6 @@ class _MainScreenState extends State<MainScreen> {
     final int index = _assignments.indexOf(assignment);
     if (index < 0) return;
 
-    // Replace the assignment without changing its position in the list.
     _updateAcademics(() {
       _assignments[index] = updated;
       _completionRevisions.remove(assignment);
@@ -353,15 +632,12 @@ class _MainScreenState extends State<MainScreen> {
       _completionRevisions[assignment] = revision;
     });
 
-    final String message = assignment.isCompleted
-        ? 'Assignment completed'
-        : 'Assignment marked incomplete';
-
     showAppFeedback(
       context,
-      message,
+      assignment.isCompleted
+          ? 'Assignment completed'
+          : 'Assignment marked incomplete',
       onUndo: () {
-        // Ignore stale Undo actions after removal, editing or another toggle.
         if (!mounted ||
             !_assignments.contains(assignment) ||
             _completionRevisions[assignment] != revision) {
@@ -407,7 +683,7 @@ class _MainScreenState extends State<MainScreen> {
     _updateAcademics(() {
       _assignments.removeAt(index);
 
-      // Invalidate completion Undo actions queued before this deletion.
+      // Invalidate completion Undo actions queued before deletion.
       _completionRevisions[assignment] =
           (_completionRevisions[assignment] ?? 0) + 1;
     });
@@ -418,7 +694,6 @@ class _MainScreenState extends State<MainScreen> {
       onUndo: () {
         if (!mounted || _assignments.contains(assignment)) return;
 
-        // Restore its original position, or append if the list is shorter.
         final int restoreIndex = index <= _assignments.length
             ? index
             : _assignments.length;
@@ -431,13 +706,11 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // --------------------------------------------------
-  // BUILD THE APPLICATION
+  // BUILD MAIN SCREEN
   // --------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    // Wait for storage before allowing edits.
-    // If loading fails, offer Retry without overwriting the saved file.
     if (_loadingAcademics) {
       return Scaffold(
         appBar: AppBar(title: const Text('Campus Companion')),
@@ -464,7 +737,6 @@ class _MainScreenState extends State<MainScreen> {
 
     final int studiedSeconds = _todayStudySeconds;
 
-    // Each screen receives the shared data and callbacks it needs.
     final List<Widget> pages = [
       HomeScreen(
         assignments: _assignments,
@@ -497,6 +769,9 @@ class _MainScreenState extends State<MainScreen> {
       SettingsScreen(
         darkMode: widget.darkMode,
         onDarkModeChanged: widget.onDarkModeChanged,
+        remindersEnabled: _remindersEnabled,
+        onRemindersChanged: _changeReminders,
+        updatingReminders: _updatingReminders,
       ),
     ];
 
@@ -512,20 +787,42 @@ class _MainScreenState extends State<MainScreen> {
           _pageTitles[_selectedIndex],
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          // Like the class example: show a real assignment reminder now.
+          if (_selectedIndex == 1 && _remindersEnabled)
+            IconButton(
+              tooltip: 'Show next assignment reminder',
+              icon: const Icon(Icons.notifications_active_outlined),
+              onPressed: _updatingReminders || _pendingSaveCount > 0
+                  ? null
+                  : _showNextAssignmentReminder,
+            ),
+        ],
       ),
       body: Column(
         children: [
-          // Wait until saving finishes before testing a restart.
           if (_pendingSaveCount > 0)
-            const LinearProgressIndicator(semanticsLabel: 'Saving app data'),
+            const LinearProgressIndicator(
+              semanticsLabel: 'Saving app data and updating reminders',
+            ),
 
-          // Failed saves remain visible until a write succeeds.
           if (_storageError != null)
             MaterialBanner(
               content: Text(_storageError!),
               actions: [
                 TextButton(
                   onPressed: _saveAcademics,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+
+          if (_notificationError != null)
+            MaterialBanner(
+              content: Text(_notificationError!),
+              actions: [
+                TextButton(
+                  onPressed: _retryNotifications,
                   child: const Text('Retry'),
                 ),
               ],
@@ -571,6 +868,48 @@ class _MainScreenState extends State<MainScreen> {
             selectedIcon: Icon(Icons.settings),
             label: 'Settings',
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// A notification tap opens the matching assignment, like the class example.
+// The content scrolls to support small screens and larger system text.
+class _AssignmentDetailsScreen extends StatelessWidget {
+  const _AssignmentDetailsScreen({required this.assignment});
+
+  final Assignment assignment;
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime due = assignment.dueDate;
+    final String date = '${due.day}/${due.month}/${due.year}';
+    final String time = TimeOfDay.fromDateTime(due).format(context);
+    final TextTheme textTheme = Theme.of(context).textTheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Assignment details')),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          Text(assignment.title, style: textTheme.headlineSmall),
+          const SizedBox(height: 16),
+          Text(assignment.course, style: textTheme.titleMedium),
+          const SizedBox(height: 12),
+          Text('Due: $date at $time'),
+          const SizedBox(height: 8),
+          Text('Priority: ${assignment.priority}'),
+          const SizedBox(height: 8),
+          Text(
+            assignment.isCompleted ? 'Status: Completed' : 'Status: Incomplete',
+          ),
+          if (assignment.description.trim().isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text('Description', style: textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(assignment.description),
+          ],
         ],
       ),
     );
