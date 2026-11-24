@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../dialogs/add_assignment_dialog.dart';
 import '../dialogs/add_course_dialog.dart';
@@ -13,7 +16,7 @@ import 'insights_screen.dart';
 import 'settings_screen.dart';
 import 'study_screen.dart';
 
-// Holds the information shared by the app's main screens.
+// Owns the data shared by Home, Academics, Study and Insights.
 class MainScreen extends StatefulWidget {
   const MainScreen({
     super.key,
@@ -29,10 +32,13 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  // Start on Home, the first page in the list.
+  // --------------------------------------------------
+  // NAVIGATION
+  // --------------------------------------------------
+
   int _selectedIndex = 0;
 
-  // Keep these titles in the same order as the pages and bottom tabs.
+  // Keep titles, pages and navigation destinations in the same order.
   static const List<String> _pageTitles = [
     'Home',
     'Academics',
@@ -42,7 +48,18 @@ class _MainScreenState extends State<MainScreen> {
     'Settings',
   ];
 
-  // Give the user some example courses and assignments on their first visit.
+  void _selectPage(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  // --------------------------------------------------
+  // SHARED APP DATA
+  // --------------------------------------------------
+
+  // These examples are saved on the first launch.
+  // Later launches replace them with the user's saved data.
   final List<String> _courses = [
     'DEMO101 - Computer Graphics',
     'CSCI3101U - Mobile Devices',
@@ -67,25 +84,153 @@ class _MainScreenState extends State<MainScreen> {
     ),
   ];
 
+  // Study storage will be connected in the next step.
   final List<StudySession> _sessions = [];
   int _goalMinutes = 120;
 
-  // Count checkbox changes so an older Undo can't reverse a newer change.
+  // Prevent an older Undo from reversing a newer completion change.
   final Map<Assignment, int> _completionRevisions = {};
 
-  void _selectPage(int index) {
+  // --------------------------------------------------
+  // COURSE AND ASSIGNMENT STORAGE
+  // --------------------------------------------------
+
+  static const String _academicStorageKey = 'campus_academics_v1';
+
+  bool _loadingAcademics = true;
+  String? _storageError;
+  int _pendingSaveCount = 0;
+
+  // Write snapshots in order so rapid changes save correctly.
+  Future<void> _pendingSave = Future<void>.value();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAcademics();
+  }
+
+  Future<void> _loadAcademics() async {
     setState(() {
-      _selectedIndex = index;
+      _loadingAcademics = true;
+      _storageError = null;
+    });
+
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+      final String? saved = prefs.getString(_academicStorageKey);
+
+      if (!mounted) return;
+
+      if (saved == null) {
+        // No save exists yet. Show and save the sample data.
+        setState(() {
+          _loadingAcademics = false;
+        });
+
+        _saveAcademics();
+        return;
+      }
+
+      final Map<String, dynamic> data =
+          jsonDecode(saved) as Map<String, dynamic>;
+
+      // Decode both lists before changing the current state.
+      // If decoding fails, the existing saved data is left untouched.
+      final List<String> courses = List<String>.from(data['courses'] as List);
+
+      final List<Assignment> assignments = (data['assignments'] as List).map((
+        item,
+      ) {
+        return Assignment.fromJson(Map<String, dynamic>.from(item as Map));
+      }).toList();
+
+      setState(() {
+        _courses
+          ..clear()
+          ..addAll(courses);
+
+        _assignments
+          ..clear()
+          ..addAll(assignments);
+
+        _completionRevisions.clear();
+        _loadingAcademics = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _storageError =
+            'Could not load your courses and assignments. Please retry.';
+      });
+    }
+  }
+
+  void _saveAcademics() {
+    // Capture the data now, before another user action changes it.
+    final String snapshot = jsonEncode({
+      'courses': List<String>.of(_courses),
+      'assignments': _assignments
+          .map((assignment) => assignment.toJson())
+          .toList(),
+    });
+
+    setState(() {
+      _pendingSaveCount++;
+    });
+
+    _pendingSave = _pendingSave.then((_) async {
+      try {
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+        final bool saved = await prefs.setString(_academicStorageKey, snapshot);
+
+        if (!saved) {
+          throw StateError('Save failed');
+        }
+
+        if (!mounted) return;
+
+        setState(() {
+          _storageError = null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+
+        setState(() {
+          _storageError =
+              'Changes could not be saved. Retry before closing the app.';
+        });
+      } finally {
+        if (mounted) {
+          setState(() {
+            _pendingSaveCount--;
+          });
+        }
+      }
     });
   }
 
-  // Add up the time from saved sessions that finished today.
+  // All course and assignment changes use this helper, including Undo.
+  void _updateAcademics(VoidCallback change) {
+    setState(change);
+    _saveAcademics();
+  }
+
+  // --------------------------------------------------
+  // STUDY SESSIONS AND DAILY GOAL
+  // --------------------------------------------------
+
+  // Count only saved sessions that finished today.
   int get _todayStudySeconds {
     final DateTime today = DateTime.now();
     int total = 0;
 
     for (final StudySession session in _sessions) {
       final DateTime finished = session.completedAt;
+
       if (finished.year == today.year &&
           finished.month == today.month &&
           finished.day == today.day) {
@@ -112,21 +257,29 @@ class _MainScreenState extends State<MainScreen> {
     showAppFeedback(context, 'Daily goal updated');
   }
 
+  // --------------------------------------------------
+  // ADD COURSE
+  // --------------------------------------------------
+
   Future<void> _addCourse() async {
     final String? course = await showDialog<String>(
       context: context,
       builder: (_) => AddCourseDialog(courses: _courses),
     );
 
-    // Cancel returns no course. Also check that this screen is still open.
+    // Cancel returns null. Do not update a screen that has closed.
     if (!mounted || course == null) return;
 
-    setState(() {
+    _updateAcademics(() {
       _courses.add(course);
     });
 
     showAppFeedback(context, 'Course added');
   }
+
+  // --------------------------------------------------
+  // ADD AND EDIT ASSIGNMENTS
+  // --------------------------------------------------
 
   Future<void> _addAssignment() async {
     final Assignment? newAssignment = await showDialog<Assignment>(
@@ -136,7 +289,7 @@ class _MainScreenState extends State<MainScreen> {
 
     if (!mounted || newAssignment == null) return;
 
-    setState(() {
+    _updateAcademics(() {
       _assignments.add(newAssignment);
     });
 
@@ -146,30 +299,33 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _editAssignment(Assignment assignment) async {
     final Assignment? updated = await showDialog<Assignment>(
       context: context,
-      builder: (_) => AddAssignmentDialog(
-        courses: _courses,
-        assignment: assignment,
-      ),
+      builder: (_) =>
+          AddAssignmentDialog(courses: _courses, assignment: assignment),
     );
 
     if (!mounted || updated == null) return;
 
-    // Replace the original assignment in the same spot in the list.
     final int index = _assignments.indexOf(assignment);
     if (index < 0) return;
 
-    setState(() {
+    // Keep the assignment in its original position.
+    _updateAcademics(() {
       _assignments[index] = updated;
+      _completionRevisions.remove(assignment);
     });
 
     showAppFeedback(context, 'Assignment updated');
   }
 
+  // --------------------------------------------------
+  // COMPLETE ASSIGNMENT AND UNDO
+  // --------------------------------------------------
+
   void _toggleAssignment(Assignment assignment) {
     final bool wasCompleted = assignment.isCompleted;
     final int revision = (_completionRevisions[assignment] ?? 0) + 1;
 
-    setState(() {
+    _updateAcademics(() {
       assignment.isCompleted = !wasCompleted;
       _completionRevisions[assignment] = revision;
     });
@@ -182,20 +338,24 @@ class _MainScreenState extends State<MainScreen> {
       context,
       message,
       onUndo: () {
-        // Undo only if the assignment still exists and this was its last change.
+        // Ignore Undo if this assignment was removed, replaced or changed again.
         if (!mounted ||
             !_assignments.contains(assignment) ||
             _completionRevisions[assignment] != revision) {
           return;
         }
 
-        setState(() {
+        _updateAcademics(() {
           assignment.isCompleted = wasCompleted;
           _completionRevisions[assignment] = revision + 1;
         });
       },
     );
   }
+
+  // --------------------------------------------------
+  // DELETE ASSIGNMENT AND UNDO
+  // --------------------------------------------------
 
   Future<void> _deleteAssignment(Assignment assignment) async {
     final bool? confirmed = await showDialog<bool>(
@@ -221,8 +381,12 @@ class _MainScreenState extends State<MainScreen> {
     final int index = _assignments.indexOf(assignment);
     if (index < 0) return;
 
-    setState(() {
+    _updateAcademics(() {
       _assignments.removeAt(index);
+
+      // Invalidate any completion Undo queued before this deletion.
+      _completionRevisions[assignment] =
+          (_completionRevisions[assignment] ?? 0) + 1;
     });
 
     showAppFeedback(
@@ -231,22 +395,53 @@ class _MainScreenState extends State<MainScreen> {
       onUndo: () {
         if (!mounted || _assignments.contains(assignment)) return;
 
-        // Put it back in its old spot, or at the end if the list got shorter.
-        final int restoreIndex =
-        index <= _assignments.length ? index : _assignments.length;
+        // Restore the original position, or append if the list is now shorter.
+        final int restoreIndex = index <= _assignments.length
+            ? index
+            : _assignments.length;
 
-        setState(() {
+        _updateAcademics(() {
           _assignments.insert(restoreIndex, assignment);
         });
       },
     );
   }
 
+  // --------------------------------------------------
+  // BUILD THE APPLICATION
+  // --------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
+    // Block editing until saved data has loaded.
+    // A failed read offers Retry without overwriting the saved file.
+    if (_loadingAcademics) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Campus Companion')),
+        body: Center(
+          child: _storageError == null
+              ? const CircularProgressIndicator()
+              : Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_storageError!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _loadAcademics,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      );
+    }
+
     final int studiedSeconds = _todayStudySeconds;
 
-    // Give each page the information and actions it needs.
+    // Pass shared data and callbacks to each screen.
     final List<Widget> pages = [
       HomeScreen(
         assignments: _assignments,
@@ -274,10 +469,7 @@ class _MainScreenState extends State<MainScreen> {
         onSaveSession: _saveStudySession,
         onGoalChanged: _changeGoal,
       ),
-      InsightsScreen(
-        assignments: _assignments,
-        sessions: _sessions,
-      ),
+      InsightsScreen(assignments: _assignments, sessions: _sessions),
       const CampusDirectoryScreen(),
       SettingsScreen(
         darkMode: widget.darkMode,
@@ -298,11 +490,31 @@ class _MainScreenState extends State<MainScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
+      body: Column(
+        children: [
+          // Wait for this indicator to disappear before testing a restart.
+          if (_pendingSaveCount > 0)
+            const LinearProgressIndicator(
+              semanticsLabel: 'Saving courses and assignments',
+            ),
 
-      // Keep the other pages open so the study timer can keep running.
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: pages,
+          // Keep save failures visible until a write succeeds.
+          if (_storageError != null)
+            MaterialBanner(
+              content: Text(_storageError!),
+              actions: [
+                TextButton(
+                  onPressed: _saveAcademics,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+
+          // Keep all tabs mounted so switching pages preserves the timer.
+          Expanded(
+            child: IndexedStack(index: _selectedIndex, children: pages),
+          ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

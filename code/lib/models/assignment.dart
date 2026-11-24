@@ -15,6 +15,30 @@ class Assignment {
   final String description;
   final String priority;
 
-  // This can change when the user checks or unchecks the assignment.
+  // Changes when the user checks or unchecks the assignment.
   bool isCompleted;
+
+  // Convert the assignment into values that can be saved as JSON.
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'course': course,
+      'dueDate': dueDate.toIso8601String(),
+      'isCompleted': isCompleted,
+      'description': description,
+      'priority': priority,
+    };
+  }
+
+  // Rebuild an assignment from its saved JSON data.
+  factory Assignment.fromJson(Map<String, dynamic> json) {
+    return Assignment(
+      title: json['title'] as String,
+      course: json['course'] as String,
+      dueDate: DateTime.parse(json['dueDate'] as String),
+      isCompleted: json['isCompleted'] as bool? ?? false,
+      description: json['description'] as String? ?? '',
+      priority: json['priority'] as String? ?? 'Medium',
+    );
+  }
 }
